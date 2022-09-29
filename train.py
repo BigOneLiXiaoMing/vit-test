@@ -13,11 +13,29 @@ from my_dataset import MyDataSet
 from vit_model import vit_base_patch16_224_in21k as create_model
 from utils import read_split_data, train_one_epoch, evaluate
 
+# 新增1:依赖
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+
 
 
 
 def main(args):
-    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    # device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+
+    local_rank = args.local_rank
+
+    # 新增3：DDP backend初始化
+    #   a.根据local_rank来设定当前使用哪块GPU
+    # torch.cuda.set_device(local_rank)
+    torch.cuda.set_device('cuda:' + local_rank)
+    #   b.初始化DDP，使用默认backend(nccl)就行。如果是CPU模型运行，需要选择其他后端。
+    dist.init_process_group(backend='nccl')
+
+    # 新增4：定义并把模型放置到单独的GPU上，需要在调用`model=DDP(model)`前做哦。
+    #       如果要加载模型，也必须在这里做哦。
+    device = torch.device("cuda:" + local_rank)
+
 
     if os.path.exists("./weights") is False:
         os.makedirs("./weights")
@@ -49,21 +67,29 @@ def main(args):
     batch_size = args.batch_size
     nw = min([os.cpu_count(), batch_size if batch_size > 1 else 0, 8])  # number of workers
     print('Using {} dataloader workers every process'.format(nw))
+
+    train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     train_loader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=batch_size,
                                                shuffle=True,
                                                pin_memory=True,
                                                num_workers=nw,
-                                               collate_fn=train_dataset.collate_fn)
+                                               collate_fn=train_dataset.collate_fn,
+                                               sampler=train_sampler)
 
+
+    val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
     val_loader = torch.utils.data.DataLoader(val_dataset,
                                              batch_size=batch_size,
                                              shuffle=False,
                                              pin_memory=True,
                                              num_workers=nw,
-                                             collate_fn=val_dataset.collate_fn)
+                                             collate_fn=val_dataset.collate_fn,
+                                             sampler=val_sampler)
 
     model = create_model(num_classes=5, has_logits=False).to(device)
+    model = DDP(model, device_ids=[int(local_rank)], output_device=int(local_rank))
+
 
     if args.weights != "":
         assert os.path.exists(args.weights), "weights file: '{}' not exist.".format(args.weights)
@@ -91,6 +117,7 @@ def main(args):
 
     for epoch in range(args.epochs):
         # train
+        train_loader.sampler.set_epoch(epoch)
         train_loss, train_acc = train_one_epoch(model=model,
                                                 optimizer=optimizer,
                                                 data_loader=train_loader,
@@ -137,6 +164,8 @@ if __name__ == '__main__':
     # 是否冻结权重
     parser.add_argument('--freeze-layers', type=bool, default=True)
     parser.add_argument('--device', default='cuda:0', help='device id (i.e. 0 or 0,1 or cpu)')
+
+    parser.add_argument("--local_rank", default=-1)
 
     opt = parser.parse_args()
 
