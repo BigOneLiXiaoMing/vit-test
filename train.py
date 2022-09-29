@@ -71,7 +71,6 @@ def main(args):
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     train_loader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=batch_size,
-                                               shuffle=True,
                                                pin_memory=True,
                                                num_workers=nw,
                                                collate_fn=train_dataset.collate_fn,
@@ -81,7 +80,6 @@ def main(args):
     val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
     val_loader = torch.utils.data.DataLoader(val_dataset,
                                              batch_size=batch_size,
-                                             shuffle=False,
                                              pin_memory=True,
                                              num_workers=nw,
                                              collate_fn=val_dataset.collate_fn,
