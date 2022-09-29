@@ -16,6 +16,7 @@ from utils import read_split_data, train_one_epoch, evaluate
 # 新增1:依赖
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 
 
@@ -87,7 +88,7 @@ def main(args):
 
     model = create_model(num_classes=5, has_logits=False).to(device)
     model = DDP(model, device_ids=[int(local_rank)], output_device=int(local_rank),find_unused_parameters=True)
-
+    model = FSDP(model)
 
     if args.weights != "":
         assert os.path.exists(args.weights), "weights file: '{}' not exist.".format(args.weights)
